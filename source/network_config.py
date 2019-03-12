@@ -1,9 +1,5 @@
 delay = 5
-NORMAL_STATE = 0
-SNAP_STATE = 1
-COLLECT_REPORT_STATE = 2
 end_symbol = "$$$"
-marker = "marker"
 start_port = 8910
 config0 = {
     "send_port": start_port+1,
