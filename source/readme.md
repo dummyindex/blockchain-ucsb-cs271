@@ -13,3 +13,9 @@ python3
 - roles: follower, candidate, leader
 - classes: log, block, networkServer(tcp), server, client
 - election timeout : need to be random to ensure some liveness
+
+
+### raft TCP server:
+- send request
+- recieve request from port and return to queue for raft server node later ops
+
