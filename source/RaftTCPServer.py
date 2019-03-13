@@ -14,6 +14,7 @@ def obtain_data(connection, symbol="$$$"):
         # print('received {!r}'.format(data))
         all_data += data.decode('utf-8')
         if all_data.find(symbol)!=-1:
+            all_data = all_data.replace(symbol, "")
             break
         '''
         # echo test
@@ -67,9 +68,9 @@ class RaftTCPServer():
             # Wait for a connection
             connection, client_address = sock.accept()
             data = obtain_data(connection)
-            
-        json_data = json.loads(data)
-        rpc_queue.put(json_data)
+            json_data = json.loads(data)
+            print("got data:", data)
+            rpc_queue.put(json_data)
         
     def start_server(self, rpc_queue):
         '''

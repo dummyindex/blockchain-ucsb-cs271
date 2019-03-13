@@ -55,8 +55,9 @@ class ServerNode():
             if self.role == leader_role:
                 continue
             
-            is_timeout = time.time() - self.last_refresh_time > self.election_timeout
+            is_timeout = (time.time() - self.last_refresh_time) > self.election_timeout
             if is_timeout:
+                print("timeout")
                 self.trans_candidate()
         
     def handle_rpc_queue(self):
@@ -71,11 +72,13 @@ class ServerNode():
         return
 
     def send_requestVote(self, name):
+        # print("sending vote request to", name)
         data = {
             "type" : requestVoteType,
             "term" : self.term,
             "lastLogIndex": len(self.block_chain) - 1,
-            "lastLogTerm": self.block_chain.get(-1).term
+            "lastLogTerm": self.block_chain.get(-1).term,
+            "source": self.name
         }
         data = json.dumps(data)
         self.tcpServer.send(name, data)
