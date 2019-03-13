@@ -141,8 +141,10 @@ class ServerNode():
 
             if self.received_vote >= majority:
                 self.trans_leader()
-            else:
-                self.trans_follower()
+
+        if req['term'] > self.term:
+            self.term = req['term']
+            self.trans_follower()
 
     def handle_req(self, req):
         req_type = req["type"]
