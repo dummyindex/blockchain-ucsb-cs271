@@ -15,7 +15,25 @@ class Block:
         return val
 
     def create_dummy_block():
-        return Block("", "", -1, bytes(0))
+        return Block("", "", 0, bytes(0))
 
     def __str__(self):
         return "term: %d, ta: %s, tb: %s, prev_hash: %s" % (self.term, self.ta, self.tb, self.prev_header_hash.hex())
+
+
+class BlockChain():
+    def __init__(self):
+        self.chain = [Block.create_dummy_block()]
+
+    def append(self, block):
+        self.chain.append(block)
+
+    def get(self, idx):
+        return self.chain[idx]
+
+    def pop(self, idx):
+        self.chain.pop(idx)
+
+
+    def __len__(self):
+        return len(self.chain)

@@ -19,3 +19,7 @@ python3
 - send request
 - recieve request from port and return to queue for raft server node later ops
 
+
+### server node
+- server node dont care about underlying ports, ip addr....
+- server node send by name
