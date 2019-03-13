@@ -69,7 +69,7 @@ class RaftTCPServer():
             connection, client_address = sock.accept()
             data = obtain_data(connection)
             json_data = json.loads(data)
-            print("got data:", data)
+            # print("got data:", data)
             rpc_queue.put(json_data)
         
     def start_server(self, rpc_queue):

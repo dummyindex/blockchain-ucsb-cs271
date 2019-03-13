@@ -11,7 +11,7 @@ leader_role = 2
 requestVoteType = "requestVote"
 appendEntryType = "appendEntry"
 voteResponseType = "voteResponse"
-transRoleType = "transRole"
+startElectionType = "startElection"
 
 
 def start_all_servers():
@@ -20,7 +20,6 @@ def start_all_servers():
         servers.append(ServerNode(name, configs))
         servers[-1].start()
     return servers
-
 
 class ServerNode():
     def __init__(self, config_name, configs):
@@ -44,6 +43,8 @@ class ServerNode():
 
         self.timeout_thread = threading.Thread(
             target=self.check_time_out, daemon=True)
+        self.notify_timeout_event = threading.Event()
+        self.notify_timeout_event.clear()
 
     def start(self):
         self.last_refresh_time = time.time()
@@ -51,15 +52,19 @@ class ServerNode():
         self.handler_thread.start()
         self.timeout_thread.start()
 
-    def add_trans_req(self, role):
+    def add_election_req(self, role):
         req = {
-            "type": transRoleType,
+            "type": startElectionType,
             "role": role
         }
         self.rpc_queue.put(req)
 
-    def trans_candidate(self):
+    def update_refresh_time(self):
         self.last_refresh_time = time.time()
+        self.notify_timeout_event.set()
+
+    def trans_candidate(self):
+        self.update_refresh_time()
         self.role = candidate_role
         self.term += 1
         # candidate vote for itself
@@ -68,28 +73,32 @@ class ServerNode():
 
     def trans_follower(self):
         self.role = follower_role
+        self.vote_for = None
 
     def trans_leader(self):
+        print("========================")
+        print(self.name, "become leader, term=", self.term)
+        print("========================")
         self.role = leader_role
 
     def check_time_out(self):
+        self.last_refresh_time = time.time()
         while True:
-            if self.role == leader_role:
-                continue
+            if self.notify_timeout_event.is_set():
+                self.last_refresh_time = time.time()
+                self.notify_timeout_event.clear()
 
             is_timeout = (
                 time.time() - self.last_refresh_time) > self.election_timeout
             if is_timeout:
                 print("timeout")
-                self.add_trans_req(candidate_role)
+                self.add_election_req(candidate_role)
                 self.last_refresh_time = time.time()
 
-    def handle_trans_req(self, req):
-        if req['role'] == candidate_role:
-            self.trans_candidate()
-        else:
-            print("Not implemented")
-            assert False
+    def handle_startElection_req(self, req):
+        if self.role == leader_role:
+            return
+        self.trans_candidate()
 
     def response_vote(self, candidate, granted):
         data = {
@@ -117,6 +126,7 @@ class ServerNode():
         if candidate_term == self.term and\
            (self.vote_for != None or self.vote_for == candidate) and\
            self.is_completer_log(other_log):
+            self.vote_for = req['source']
             self.response_vote(candidate, True)
             self.election_timeout = gen_timeout()
         else:
@@ -124,6 +134,7 @@ class ServerNode():
 
     def handle_voteResponse_req(self, req):
         '''
+        only candidate cares about it
         data = {
             'type': voteResponseType,
             'term': self.term,
@@ -135,10 +146,13 @@ class ServerNode():
         if vote granted:
             add voted number, compare to majority
         '''
-        majority = (len(configs) - 1) / 2
-        if req['voteGranted']:
-            self.received_vote += 1
+        if self.role != candidate_role:
+            return
 
+        majority = len(configs) / 2 + 1
+        if req['voteGranted']:
+            assert req['term'] <= self.term
+            self.received_vote += 1
             if self.received_vote >= majority:
                 self.trans_leader()
 
@@ -148,17 +162,17 @@ class ServerNode():
 
     def handle_req(self, req):
         req_type = req["type"]
-        if req_type == transRoleType:
-            self.last_refresh_time = time.time()
-            self.handle_transRole_req(req)
-        if req_type == requestVoteType:
-            self.last_refresh_time = time.time()
+        if req_type == startElectionType:
+            self.update_refresh_time()
+            self.handle_startElection_req(req)
+        elif req_type == requestVoteType:
+            self.update_refresh_time()
             self.handle_requestVote_req(req)
-        if req_type == voteResponseType:
-            #self.last_refresh_time = time.time()
+        elif req_type == voteResponseType:
+            # self.update_refresh_time()
             self.handle_voteResponse_req(req)
         else:
-            print("not implemented")
+            print("not implemented:", req)
 
     def handle_rpc_queue(self):
         '''
