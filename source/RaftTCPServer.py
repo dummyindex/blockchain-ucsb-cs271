@@ -40,10 +40,10 @@ class RaftTCPServer():
         self.name = config["name"]
         self.end_symbol = network_config.end_symbol
         self.name2outports = {}
-        for i in range(len(configs)):
-            if i == config_name:
+        for name in configs:
+            if name == config_name:
                 continue
-            config = configs[i]
+            config = configs[name]
             name = config["name"]
             self.name2outports[name] = config["recv_port"]
 
@@ -65,7 +65,6 @@ class RaftTCPServer():
         sock.listen(20)
         while True:
             # Wait for a connection
-            # print('waiting for a connection')
             connection, client_address = sock.accept()
             data = obtain_data(connection)
             
@@ -76,7 +75,7 @@ class RaftTCPServer():
         '''
         None blocking
         '''
-        t1 = threading.Thread(target=self.start_tcp, args=(rpc_queue), daemon=True)
+        t1 = threading.Thread(target=self.start_tcp, args=[rpc_queue], daemon=True)
         t1.start()
         
     def send(self, name, data):

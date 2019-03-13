@@ -4,11 +4,19 @@ import queue
 import threading
 from Block import *
 from RaftTCPServer import *
+from network_config import *
 follower_role = 0
 candidate_role = 1
 leader_role = 2
 requestVoteType = "requestVote"
 appendEntryType = "appendEntry"
+
+def start_all_servers():
+    servers = []
+    for name in configs:
+        servers.append(ServerNode(name, configs))
+        servers[-1].start()
+    return servers
 
 class ServerNode():
     def __init__(self, config_name, configs):
@@ -19,21 +27,22 @@ class ServerNode():
         self.election_timeout = gen_timeout()
         self.block_chain = BlockChain()
         self.term = config["init_term"]
-        self.other_names = [config["name"] for config in configs]
+        self.other_names = [name for name in configs]
         self.other_names.remove(self.name)
         self.last_refresh_time = time.time()
         #  RPC queue
         self.rpc_queue = queue.Queue()
-        self.tcpServer = RaftTCPServer(config, configs)
-        self.handler_thread = threading.Thread(target=self.handle_rpc_queue, args=(self.rpc_queue), daemon=True)
+        self.tcpServer = RaftTCPServer(self.name, configs)
+        self.handler_thread = threading.Thread(target=self.handle_rpc_queue, daemon=True)
         
-        self.timeout_thread = threading.Thread(target=self.check_time_out, args=(self.rpc_queue), daemon=True)
+        self.timeout_thread = threading.Thread(target=self.check_time_out, daemon=True)
         
 
     def start(self):
         self.last_refresh_time = time.time()
         self.tcpServer.start_server(self.rpc_queue)
         self.handler_thread.start()
+        self.timeout_thread.start()
 
     def trans_candidate(self):
         self.last_refresh_time = time.time()
@@ -54,6 +63,11 @@ class ServerNode():
         '''
         todo: dispatch all reqs here
         '''
+        while True:
+            if self.rpc_queue.empty():
+                continue
+            req = self.rpc_queue.get()
+            print(req)
         return
 
     def send_requestVote(self, name):
