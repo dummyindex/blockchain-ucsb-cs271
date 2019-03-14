@@ -11,6 +11,7 @@ leader_role = 2
 requestVoteType = "requestVote"
 appendEntryType = "appendEntry"
 voteResponseType = "voteResponse"
+clientCommandType = "clientCommand"
 transRoleType = "transRole"
 
 
@@ -29,6 +30,7 @@ class ServerNode():
         self.config = config
         self.role = follower_role
         self.election_timeout = gen_timeout()
+        self.is_timeout_thread = threading.Event()
         self.vote_for = None
         self.received_vote = 0
         self.block_chain = BlockChain()
@@ -71,6 +73,13 @@ class ServerNode():
 
     def trans_leader(self):
         self.role = leader_role
+        '''
+        Todo: if leader has been elected
+        1. send heartbeat (empty AppendEntries)
+        2. receive client commd
+        3. logIndex >= nextIndex for a follower, send AppendEntries with log entries
+        4. N > commitIndex ?
+        '''
 
     def check_time_out(self):
         while True:
@@ -81,7 +90,9 @@ class ServerNode():
                 time.time() - self.last_refresh_time) > self.election_timeout
             if is_timeout:
                 print("timeout")
-                self.add_trans_req(candidate_role)
+                self.is_timeout_thread.set()
+                self.trans_candidate()
+                # self.add_trans_req(candidate_role)
                 self.last_refresh_time = time.time()
 
     def handle_trans_req(self, req):
@@ -140,11 +151,25 @@ class ServerNode():
             self.received_vote += 1
 
             if self.received_vote >= majority:
+                self.is_timeout_thread.clear()
                 self.trans_leader()
 
         if req['term'] > self.term:
             self.term = req['term']
+            self.is_timeout_thread.clear()
             self.trans_follower()
+
+    def handle_clientCommand(self, req):
+        '''
+        data = {
+            type: clientCommandType
+            transaction detail:
+                send_client
+                recv_client
+                amount
+        }
+        '''
+        pass
 
     def handle_req(self, req):
         req_type = req["type"]
@@ -157,6 +182,14 @@ class ServerNode():
         if req_type == voteResponseType:
             #self.last_refresh_time = time.time()
             self.handle_voteResponse_req(req)
+        if req_type == clientCommandType:
+            if self.role == follower_role:
+                pass
+                # redirect to current leader
+            if self.role == leader_role:
+                self.handle_clientCommand(req)
+            if self.role == candidate_role:
+                pass
         else:
             print("not implemented")
 
