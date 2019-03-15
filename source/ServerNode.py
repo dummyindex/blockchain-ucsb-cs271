@@ -48,6 +48,9 @@ class ServerNode():
         self.notify_timeout_thread_refresh_time_event = threading.Event()
         self.notify_timeout_thread_refresh_time_event.clear()
 
+        # heart beat for leader
+        self.heartbeat_thread = None
+
     def start(self):
         self.last_refresh_time = time.time()
         self.tcpServer.start_server(self.rpc_queue)
@@ -71,6 +74,7 @@ class ServerNode():
         self.term += 1
         # candidate vote for itself
         self.vote_for = self.name
+        self.received_vote = 1
         self.send_requestVotes()
 
     def trans_follower(self):
@@ -79,7 +83,7 @@ class ServerNode():
 
     def trans_leader(self):
         print("========================")
-        print(self.name, "become leader, term=", self.term)
+        print(self.name, "become leader, term", self.term, "votes", self.received_vote)
         print("========================")
         self.role = leader_role
         '''
@@ -89,7 +93,7 @@ class ServerNode():
         3. logIndex >= nextIndex for a follower, send AppendEntries with log entries
         4. N > commitIndex ?
         '''
-
+        
     def check_time_out(self):
         self.last_refresh_time = time.time()
         while True:
@@ -100,13 +104,14 @@ class ServerNode():
             is_timeout = (
                 time.time() - self.last_refresh_time) > self.election_timeout
             if is_timeout:
-                print("timeout")
+                # print(self.name, "timeout")
                 self.add_election_req(candidate_role)
                 self.last_refresh_time = time.time()
 
     def handle_startElection_req(self, req):
         if self.role == leader_role:
             return
+        print(self.name, "start election at term", self.term + 1)
         self.trans_candidate()
 
     def response_vote(self, candidate, granted):
@@ -124,6 +129,47 @@ class ServerNode():
         '''
         return True
 
+    def response_appendEntries(self, success):
+        pass
+
+    def has_matched_block(self, index, term):
+        if index <0 or index >= len(self.block_chain):
+            return False
+        block = self.block_chain.get(index)
+        return block.term == term
+
+    def handle_appendEntries(self, req):
+        '''
+        '''
+        term = req['term']
+        # not valid leader term case
+        if self.term > term:
+            self.response_appendEntries(False)
+            return
+
+        if term > self.term:
+            self.term = term
+
+        # stepdown
+        if self.role == candidate_role or self.role == leader_role:
+            self.trans_follower()
+
+        self.update_refresh_time()
+
+        prevLogIndex =  req['prevLogIndex']
+        prevLogTerm = req['prevLogTerm']
+        assert prevLogIndex >= 0
+        if not self.has_matched_block(prevLogIndex, prevLogTerm):
+            self.response_appendEntries(False)
+            return
+
+        # todo - handle conflict
+
+        # append new entries
+
+        # advance state machine - balance
+
+
     def handle_requestVote_req(self, req):
         candidate_term = req['term']
         candidate = req['source']
@@ -133,11 +179,13 @@ class ServerNode():
             if self.role == leader_role or self.role == candidate_role:
                 self.trans_follower()
         if candidate_term == self.term and\
-           (self.vote_for != None or self.vote_for == candidate) and\
+           (self.vote_for == None or self.vote_for == candidate) and\
            self.is_completer_log(other_log):
+            print("%s grant vote to %s at term %d" % (self.name, candidate, self.term))
             self.vote_for = req['source']
             self.response_vote(candidate, True)
             self.election_timeout = gen_timeout()
+            self.update_refresh_time()
         else:
             self.response_vote(candidate, False)
 
@@ -158,12 +206,13 @@ class ServerNode():
         if self.role != candidate_role:
             return
 
-        majority = len(configs) / 2 + 1
+        majority = int(len(configs) / 2) + 1
         if req['voteGranted']:
             assert req['term'] <= self.term
-            self.received_vote += 1
-            if self.received_vote >= majority:
-                self.trans_leader()
+            if req['term'] == self.term:
+                self.received_vote += 1
+                if self.received_vote >= majority:
+                    self.trans_leader()
 
         if req['term'] > self.term:
             self.term = req['term']
