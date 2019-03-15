@@ -26,7 +26,7 @@ class Block:
     def to_dict(self):
         return {
             "txns": [self.ta, self.tb],
-            "nonce": self.nonce,
+            "nonce": encode_bytes(self.nonce),
             "term" : self.term,
             "prev_header_hash": encode_bytes(self.prev_header_hash),
             "txn_hash": encode_bytes(self.txn_hash),

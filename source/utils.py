@@ -4,10 +4,10 @@ import random
 import base64
 
 def encode_bytes(b):
-    return base64.b64encode(b)
+    return b.hex()
 
-def decode_bytes(b):
-    return base64.b64decode(b)
+def decode_bytes(s):
+    return bytes.fromhex(s)
 
 def sha256_str(s):
     return hashlib.sha256(s.encode('utf-8')).digest()
@@ -55,7 +55,7 @@ def find_valid_nonce(t1, t2):
         nonce = gen_nonce()
     return nonce
 
-def gen_timeout(t=1):
+def gen_timeout(t=4):
     '''
     t : timeout
     return timeout in [t, 2t]
