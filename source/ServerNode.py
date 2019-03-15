@@ -74,6 +74,7 @@ class ServerNode():
         while True:
             # handle user input?
             pass
+
     def heartbeat_leader_thread(self):
         last_time = time.time()
         interval = self.election_timeout/3.0
@@ -205,7 +206,7 @@ class ServerNode():
         next_id = prevLogIndex + len(block_list) + 1
         # not valid leader term case
         if self.term > term:
-            self.response_appendEntries(leader, False, prevLogIndex, next_id)
+            self.response_appendEntries(leader, False, prevLogIndex, next_id, term)
             return
 
         if term > self.term:
@@ -218,12 +219,12 @@ class ServerNode():
         
         # is heartbeat
         if is_heartbeat:
-            self.response_appendEntries(leader, True, prevLogIndex, next_id, is_heartbeat=True)
+            self.response_appendEntries(leader, True, prevLogIndex, next_id, term, is_heartbeat=True)
             return
         
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
-            self.response_appendEntries(leader, False, prevLogIndex, next_id)
+            self.response_appendEntries(leader, False, prevLogIndex, next_id, term)
             return
         
         # append new entries
@@ -231,7 +232,7 @@ class ServerNode():
         # advance state machine - balance
 
         # respond
-        self.response_appendEntries(leader, True, prevLogIndex, next_id)
+        self.response_appendEntries(leader, True, prevLogIndex, next_id, term)
         
     def handle_requestVote_req(self, req):
         candidate_term = req['term']
@@ -332,6 +333,7 @@ class ServerNode():
         prevLogIndex = req['prevLogIndex']
         is_heartbeat = req['is_heartbeat']
         next_index = req['next_index']
+        sent_term = req['sent_term']
         # stepdown
         if term > self.term:
             assert not req['success']
@@ -340,7 +342,7 @@ class ServerNode():
 
         # corner case: append sent in previous terms
         # just returned, meaningless
-        if term < self.term:
+        if sent_term < self.term:
             # assert not req['success']
             return
         
@@ -453,7 +455,8 @@ class ServerNode():
         for name in self.name2nextIndex:
             self.send_appendEntries(name, is_heartbeat=True)
 
-    def response_appendEntries(self, leader, success, prevLogIndex, next_index, is_heartbeat=False):
+    def response_appendEntries(self, leader, success, prevLogIndex,
+                               next_index, sent_term, is_heartbeat=False):
         data = {
             "type" : appendEntriesResponseType,
             "term" : self.term,
@@ -461,7 +464,8 @@ class ServerNode():
             "source" : self.name,
             "prevLogIndex" : prevLogIndex,
             "is_heartbeat": is_heartbeat,
-            "next_index": next_index
+            "next_index": next_index,
+            "sent_term" : sent_term
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)
@@ -472,7 +476,7 @@ class ServerNode():
 
     def leader_update_followers(self):
         assert self.role == leader_role
-        interval = self.avg_election_timeout/3
+        interval = self.avg_election_timeout/5
         for name in self.name2nextIndex:
             nextIndex = self.name2nextIndex[name]
             if self.block_chain.lastLogIndex() < nextIndex:
