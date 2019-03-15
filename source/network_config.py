@@ -12,6 +12,8 @@ config1 = {
     "recv_port": start_port+4,
     "name": "B",
     "init_term": 0
+    # "is_leader": 1
+
 }
 config2 = {
     "send_port": start_port+5,

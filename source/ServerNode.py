@@ -41,6 +41,7 @@ class ServerNode():
         self.other_names = [name for name in configs]
         self.other_names.remove(self.name)
         self.last_refresh_time = time.time()
+        self.crash_list = []
         #  RPC queue
         self.rpc_queue = queue.Queue()
         all_configs = dict(configs)
@@ -65,9 +66,15 @@ class ServerNode():
 
         # log commit info
         self.name2loggedIndex = None
-        
+        self.name2lastReqTime = {}
+        for name in self.other_names:
+            self.name2lastReqTime[name] = time.time()
     def start(self):
         self.last_refresh_time = time.time()
+        # for testing
+        if "is_leader" in self.config:
+            self.trans_leader()
+
         self.tcpServer.start_server(self.rpc_queue)
         self.handler_thread.start()
         self.timeout_thread.start()
@@ -121,6 +128,11 @@ class ServerNode():
         self.vote_for = self.name
         self.received_vote = 1
         self.send_requestVotes()
+        print("majority=", self.majority())
+        print(self.crash_list)
+        if self.received_vote >= self.majority():
+            self.trans_leader()
+
 
     def trans_follower(self):
         # step down
@@ -134,7 +146,7 @@ class ServerNode():
         self.role = follower_role
         self.vote_for = None
         self.leader = None
-        
+
     def trans_leader(self):
         print("========================")
         print(self.name, "become leader, term", self.term, "votes", self.received_vote)
@@ -142,12 +154,14 @@ class ServerNode():
         self.role = leader_role
         self.name2nextIndex = {}
         self.name2lastContactTime = {}
+        self.name2lastReqTime = {}
         self.name2loggedIndex = {}
         self.txn_buffer = []
         for name in self.other_names:
             self.name2nextIndex[name] = self.block_chain.lastLogIndex() + 1
             self.name2lastContactTime[name] = time.time()
             self.name2loggedIndex[name] = set()
+            self.name2lastReqTime[name] = time.time()
         self.send_heartbeats() # send heartbeats immediately
         self.heartbeat_end_event.clear()
         # self.heartbeat_thread = threading.Thread(
@@ -273,39 +287,40 @@ class ServerNode():
         if self.role != candidate_role:
             return
 
-        majority = int(len(configs) / 2) + 1
+        majority = self.majority()
         if req['voteGranted']:
             assert req['term'] <= self.term
             if req['term'] == self.term:
                 self.received_vote += 1
                 if self.received_vote >= majority:
                     self.trans_leader()
-
         if req['term'] > self.term:
             self.term = req['term']
             self.trans_follower()
-
 
     def update_success_follower_log(self, name, next_index):
         self.name2loggedIndex[name].add(next_index-1)
         self.name2nextIndex[name] = next_index
         
     def majority(self):
-        return int(len(configs)/2)+1
+        return int((len(configs)-len(self.crash_list))/2)+1
+        # return int(len(configs)/2)+1
 
-    def count_logged_follower_num(self, i):
-        count = 0
+    def count_logged_nodes_num(self, i):
+        # leader self logged
+        count = 1
         for name in self.name2loggedIndex:
             for index in self.name2loggedIndex[name]:
                 if i <= index:
                     count += 1
                     break
-                
+        return count
+
     def check_update_commit(self):
         start = self.block_chain.get_commitIndex() + 1
         end = len(self.block_chain)
         for i in range(start, end):
-            if self.count_logged_follower_num(i) >= self.majority():
+            if self.count_logged_nodes_num(i) >= self.majority():
                 self.block_chain.commit_next()
             else:
                 break
@@ -365,6 +380,7 @@ class ServerNode():
             amount:
         }
         '''
+        self.block_chain.print_chain()
         if self.role == candidate_role:
             # discard, let client reissue
             return
@@ -384,18 +400,42 @@ class ServerNode():
             client_name = req['source']
 
             temp = send_client + " " + recv_client + " " + str(amount)
-            self.txn_buffer.append((temp, (client_name, txn_id)))
+            txn_info = (client_name, txn_id)
+            if self.block_chain.txn_committed(txn_info):
+                self.response_client_txn(txn_info)
+                return
+            self.txn_buffer.append((temp, txn_info))
             if len(self.txn_buffer) == 2:
                 new_block = Block(self.txn_buffer[0][0], self.txn_buffer[1][0], self.term, self.block_chain.get(-1).hash())
                 # client_name = txn_buffer[1][0]
                 # txn_id = txn_buffer[1][1]
-                txn_info_a = txn_buffer[0][1]
-                txn_info_b = txn_buffer[1][1]
+                txn_info_a = self.txn_buffer[0][1]
+                txn_info_b = self.txn_buffer[1][1]
+                new_block.add_info(txn_info_a)
+                new_block.add_info(txn_info_b)
                 self.block_chain.append(new_block)
-                txn_buffer = []
+                self.txn_buffer = []
+
+    def  update_last_req_time(self, req):
+        if not ("source" in req):
+            return
+        name = req['source']
+        # only considers server name
+        if name in self.other_names:
+            self.name2lastReqTime[name] = name
+
+    def update_crash_list(self):
+        if self.role == follower_role:
+            return
+        self.crash_list = []
+        for name in self.name2lastReqTime:
+            last_time = self.name2lastReqTime[name]
+            if time.time() - last_time > self.election_timeout:
+                self.crash_list.append(name)
 
     def handle_req(self, req):
         req_type = req["type"]
+        self.update_last_req_time(req)
         if req_type == startElectionType:
             self.update_refresh_time()
             self.handle_startElection_req(req)
@@ -417,7 +457,9 @@ class ServerNode():
         todo: dispatch all reqs here
         '''
         while True:
+            self.update_crash_list()
             if self.role == leader_role:
+                self.check_update_commit()
                 self.leader_update_followers()
             while not self.rpc_queue.empty():
                 req = self.rpc_queue.get()
@@ -476,6 +518,18 @@ class ServerNode():
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)
+
+    def response_client_txn(self, txn_info):
+        data = {
+            "type" : txnCommitType,
+            "term" : self.term,
+            "source" : self.name,
+            "txn_id" : txn_info[1]
+        }
+        print("-----response txn")
+        data = json.dumps(data)
+        client = txn_info[0]
+        self.tcpServer.send(client, data)
 
     def redirect_clientCommand(self, name, req):
         data = json.dumps(req)

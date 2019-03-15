@@ -42,12 +42,15 @@ class Client():
         pass
 
     def handle_complete_txn(self, req):
+        print("---complete")
         txn_id = req['txn_id']
         self.balance -= self.id2amount[txn_id]
+        if txn_id in self.txns:
+            self.txns.pop(txn_id)
         print("updated balance:", self.balance)
 
     def handle_cmds(self):
-        txns = {}
+        self.txns = {}
         last_upload_time = time.time()
         interval = 0.3
         while True:
@@ -62,12 +65,13 @@ class Client():
             if time.time() - last_upload_time > interval:
                 while not self.txn_queue.empty():
                     ta, tb, amount, txn_id = self.txn_queue.get()
-                    assert not (txn_id in txns)
-                    txns[txn_id] = (ta, tb, amount)
+                    assert not (txn_id in self.txns)
+                    self.txns[txn_id] = (ta, tb, amount)
                 last_upload_time = time.time()
 
-            for txn_id in txns:
-                self.send_clientCommand(ta, tb, amount, txn_id)
+                for txn_id in self.txns:
+                    ta, tb, amount = self.txns[txn_id]
+                    self.send_clientCommand(ta, tb, amount, txn_id)
 
             # print balance and block chain command
 
@@ -85,6 +89,8 @@ class Client():
         if self.estimate_leader == None:
             leader = random.choice(self.server_names)
         print("sending txn to esitmated leader", leader)
+        data = json.dumps(data)
+        # print(data)
         self.tcpServer.send(leader, data)
 
     def update_client(self):

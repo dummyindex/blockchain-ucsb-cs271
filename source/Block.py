@@ -1,5 +1,5 @@
 from utils import *
-
+import json
 
 class Block:
     def __init__(self, ta, tb, term, prev_header_hash, nonce=None):
@@ -9,6 +9,7 @@ class Block:
         self.prev_header_hash = prev_header_hash
         self.txn_hash = sha256_byte(sha256_str(ta) + sha256_str(tb))
         self.nonce = nonce
+        self.infos = []
         if nonce == None:
             self.nonce = find_valid_nonce(ta, tb)
         self.final_hash = sha256_byte(self.txn_hash + self.nonce)
@@ -17,6 +18,9 @@ class Block:
         val = sha256_str(str(self.term) + self.prev_header_hash.hex()
                          + self.txn_hash.hex() + self.nonce.hex())
         return val
+
+    def add_info(self, info):
+        self.infos.append(info)
 
     def create_dummy_block():
         return Block("", "", 0, bytes(0))
@@ -42,6 +46,14 @@ class Block:
         term = d["term"]
         prev_header_hash = decode_bytes(d["prev_header_hash"])
         return Block(ta, tb, term, prev_header_hash, nonce)
+
+    def print_block(self):
+        data = self.to_dict()
+        for key in data:
+            print(key, ":", data[key])
+
+
+
 
 class BlockChain():
     def __init__(self):
@@ -82,7 +94,25 @@ class BlockChain():
         self.chain = self.chain[:start]
         for i in range(start, len(self.chain)):
             self.chain.append(block_list[i - start])
-            
+
     def commit_next(self):
+        print("----commit")
         self.commitIndex += 1
-        
+
+    def print_chain(self):
+        print("===========================================")
+        print("===========================================")
+        for i in range(len(self.chain)):
+            block = self.chain[i]
+            print("Block index", i)
+            block.print_block()
+            print("+++++++++++++++++++++++++++++++")
+        print("===========================================")
+        print("===========================================")
+
+    def txn_committed(self, info):
+        for i in range(self.get_commitIndex()+1):
+            if info in self.chain[i].infos:
+                return True
+
+        return False
