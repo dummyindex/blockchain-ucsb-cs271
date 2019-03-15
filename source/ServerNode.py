@@ -23,6 +23,7 @@ def start_all_servers():
         servers[-1].start()
     return servers
 
+
 class ServerNode():
     def __init__(self, config_name, configs):
         config = configs[config_name]
@@ -216,6 +217,7 @@ class ServerNode():
         majority = int(len(configs) / 2) + 1
         if req['voteGranted']:
             assert req['term'] <= self.term
+
             if req['term'] == self.term:
                 self.received_vote += 1
                 if self.received_vote >= majority:
