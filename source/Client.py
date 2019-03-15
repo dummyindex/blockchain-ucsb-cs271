@@ -49,7 +49,7 @@ class Client():
         else:
             return
 
-        self.balance -= self.id2amount[txn_id]
+        self.balance = float(req['balance'])
         print("updated balance:", self.balance)
 
     def handle_cmds(self):
