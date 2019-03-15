@@ -9,7 +9,7 @@ follower_role = 0
 candidate_role = 1
 leader_role = 2
 requestVoteType = "requestVote"
-appendEntryType = "appendEntry"
+appendEntriesType = "appendEntriesType"
 voteResponseType = "voteResponse"
 startElectionType = "startElection"
 clientCommandType = "clientCommand"
@@ -57,6 +57,13 @@ class ServerNode():
         self.handler_thread.start()
         self.timeout_thread.start()
 
+    def leader_heart_beat_thread(self):
+        last_time = time.time()
+        interval = self.election_timeout/3
+        while time.time() - last_time > interval:
+            self.send_heartbeats()
+
+
     def add_election_req(self, role):
         req = {
             "type": startElectionType,
@@ -67,6 +74,20 @@ class ServerNode():
     def update_refresh_time(self):
         self.last_refresh_time = time.time()
         self.notify_timeout_thread_refresh_time_event.set()
+
+    def check_time_out(self):
+        self.last_refresh_time = time.time()
+        while True:
+            if self.notify_timeout_thread_refresh_time_event.is_set():
+                self.last_refresh_time = time.time()
+                self.notify_timeout_thread_refresh_time_event.clear()
+
+            is_timeout = (
+                time.time() - self.last_refresh_time) > self.election_timeout
+            if is_timeout:
+                # print(self.name, "timeout")
+                self.add_election_req(candidate_role)
+                self.last_refresh_time = time.time()
 
     def trans_candidate(self):
         self.update_refresh_time()
@@ -93,20 +114,6 @@ class ServerNode():
         3. logIndex >= nextIndex for a follower, send AppendEntries with log entries
         4. N > commitIndex ?
         '''
-        
-    def check_time_out(self):
-        self.last_refresh_time = time.time()
-        while True:
-            if self.notify_timeout_thread_refresh_time_event.is_set():
-                self.last_refresh_time = time.time()
-                self.notify_timeout_thread_refresh_time_event.clear()
-
-            is_timeout = (
-                time.time() - self.last_refresh_time) > self.election_timeout
-            if is_timeout:
-                # print(self.name, "timeout")
-                self.add_election_req(candidate_role)
-                self.last_refresh_time = time.time()
 
     def handle_startElection_req(self, req):
         if self.role == leader_role:
@@ -164,7 +171,7 @@ class ServerNode():
             return
 
         # todo - handle conflict
-
+        
         # append new entries
 
         # advance state machine - balance
@@ -279,3 +286,18 @@ class ServerNode():
     def send_requestVotes(self):
         for name in self.other_names:
             self.send_requestVote(name)
+
+    def send_appendEntries(self, name):
+        next_index = self.name2nextIndex[name]
+        data = {
+            "type": appendEntriesType,
+            "term": self.term,
+            "prevLogIndex": len(self.block_chain) - 1,
+            "prevLogTerm": self.block_chain.get(-1).term,
+            "source": self.name,
+            "leaderId": self.name,
+            "entries": self.block_chain.get_entries_start_at_list(next_index)
+            "commitIndex": self.block_chain.get_commitIndex()
+        }
+        data = json.dumps(data)
+        self.tcpServer.send(name, data)

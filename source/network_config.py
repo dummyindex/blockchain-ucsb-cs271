@@ -1,6 +1,6 @@
 delay = 5
 end_symbol = "$$$"
-start_port = 8930
+start_port = 8940
 config0 = {
     "send_port": start_port+1,
     "recv_port": start_port+2,
