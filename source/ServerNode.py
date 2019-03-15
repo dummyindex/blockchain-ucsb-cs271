@@ -11,6 +11,7 @@ leader_role = 2
 requestVoteType = "requestVote"
 appendEntriesType = "appendEntriesType"
 voteResponseType = "voteResponse"
+appendEntriesResponseType = "appendEntriesResponseType"
 startElectionType = "startElection"
 clientCommandType = "clientCommand"
 transRoleType = "transRole"
@@ -51,6 +52,8 @@ class ServerNode():
 
         # heart beat for leader
         self.heartbeat_thread = None
+        self.heartbeat_end_event = threading.Event()
+        self.heartbeat_end_event.clear()
 
     def start(self):
         self.last_refresh_time = time.time()
@@ -58,11 +61,17 @@ class ServerNode():
         self.handler_thread.start()
         self.timeout_thread.start()
 
-    def leader_heart_beat_thread(self):
+    def heartbeat_leader_thread(self):
         last_time = time.time()
-        interval = self.election_timeout/3
-        while time.time() - last_time > interval:
-            self.send_heartbeats()
+        interval = self.election_timeout/3.0
+        while True:
+            if self.heartbeat_end_event.is_set():
+                self.heartbeat_end_event.clear() # no need to clear, but harmless
+                return
+
+            if time.time() - last_time > interval:
+                self.send_heartbeats()
+                last_time = time.time()
 
 
     def add_election_req(self, role):
@@ -80,6 +89,7 @@ class ServerNode():
         self.last_refresh_time = time.time()
         while True:
             if self.notify_timeout_thread_refresh_time_event.is_set():
+                print("timeout thread refreshing....")
                 self.last_refresh_time = time.time()
                 self.notify_timeout_thread_refresh_time_event.clear()
 
@@ -100,6 +110,14 @@ class ServerNode():
         self.send_requestVotes()
 
     def trans_follower(self):
+        # step down
+        assert self.role != follower_role
+        if self.role == leader_role:
+            self.heartbeat_end_event.set()
+            self.heartbeat_thread.join()
+            print("heartbeat ends")
+            self.heartbeat_thread = None
+        assert self.heartbeat_thread == None
         self.role = follower_role
         self.vote_for = None
 
@@ -108,6 +126,14 @@ class ServerNode():
         print(self.name, "become leader, term", self.term, "votes", self.received_vote)
         print("========================")
         self.role = leader_role
+        self.name2nextIndex = {}
+        for name in self.other_names:
+            self.name2nextIndex[name] = self.block_chain.lastLogIndex()
+        self.send_heartbeats() # send heartbeats immediately
+        self.heartbeat_end_event.clear()
+        self.heartbeat_thread = threading.Thread(
+            target=self.heartbeat_leader_thread, daemon=True)
+        self.heartbeat_thread.start()
         '''
         Todo: if leader has been elected
         1. send heartbeat (empty AppendEntries)
@@ -115,12 +141,6 @@ class ServerNode():
         3. logIndex >= nextIndex for a follower, send AppendEntries with log entries
         4. N > commitIndex ?
         '''
-
-    def handle_startElection_req(self, req):
-        if self.role == leader_role:
-            return
-        print(self.name, "start election at term", self.term + 1)
-        self.trans_candidate()
 
     def response_vote(self, candidate, granted):
         data = {
@@ -137,8 +157,11 @@ class ServerNode():
         '''
         return True
 
-    def response_appendEntries(self, success):
-        pass
+    def handle_startElection_req(self, req):
+        if self.role == leader_role:
+            return
+        print(self.name, "start election at term", self.term + 1)
+        self.trans_candidate()
 
     def has_matched_block(self, index, term):
         if index <0 or index >= len(self.block_chain):
@@ -146,13 +169,16 @@ class ServerNode():
         block = self.block_chain.get(index)
         return block.term == term
 
-    def handle_appendEntries(self, req):
+    def handle_appendEntries_req(self, req):
         '''
         '''
+        self.update_refresh_time()
+        is_heartbeat = req['is_heartbeat']
         term = req['term']
+        leader = req['leaderId']
         # not valid leader term case
         if self.term > term:
-            self.response_appendEntries(False)
+            self.response_appendEntries(leader, False)
             return
 
         if term > self.term:
@@ -162,15 +188,16 @@ class ServerNode():
         if self.role == candidate_role or self.role == leader_role:
             self.trans_follower()
 
-        self.update_refresh_time()
-
         prevLogIndex =  req['prevLogIndex']
         prevLogTerm = req['prevLogTerm']
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
-            self.response_appendEntries(False)
+            self.response_appendEntries(leader, False)
             return
 
+        # has matched block and is heartbeat
+        if is_heartbeat:
+            self.response_appendEntries(leader, True)
         # todo - handle conflict
         
         # append new entries
@@ -184,8 +211,10 @@ class ServerNode():
         other_log = None
         if candidate_term > self.term:
             self.term = candidate_term
+            # stepdown
             if self.role == leader_role or self.role == candidate_role:
                 self.trans_follower()
+
         if candidate_term == self.term and\
            (self.vote_for == None or self.vote_for == candidate) and\
            self.is_completer_log(other_log):
@@ -245,11 +274,11 @@ class ServerNode():
             self.update_refresh_time()
             self.handle_startElection_req(req)
         elif req_type == requestVoteType:
-            self.update_refresh_time()
             self.handle_requestVote_req(req)
         elif req_type == voteResponseType:
-            # self.update_refresh_time()
             self.handle_voteResponse_req(req)
+        elif req_type == appendEntriesType:
+            self.handle_appendEntries_req(req)
         elif req_type == clientCommandType:
             if self.role == follower_role:
                 pass
@@ -269,7 +298,7 @@ class ServerNode():
             if self.rpc_queue.empty():
                 continue
             req = self.rpc_queue.get()
-            print(req)
+            print(self.name, self.term, ":", req)
             self.handle_req(req)
         return
 
@@ -289,7 +318,7 @@ class ServerNode():
         for name in self.other_names:
             self.send_requestVote(name)
 
-    def send_appendEntries(self, name):
+    def send_appendEntries(self, name, is_heartbeat=False):
         next_index = self.name2nextIndex[name]
         data = {
             "type": appendEntriesType,
@@ -298,8 +327,22 @@ class ServerNode():
             "prevLogTerm": self.block_chain.get(-1).term,
             "source": self.name,
             "leaderId": self.name,
-            "entries": self.block_chain.get_entries_start_at_list(next_index)
-            "commitIndex": self.block_chain.get_commitIndex()
+            "entries": self.block_chain.get_entries_start_at_list(next_index),
+            "commitIndex": self.block_chain.get_commitIndex(),
+            "is_heartbeat": is_heartbeat
         }
         data = json.dumps(data)
         self.tcpServer.send(name, data)
+
+    def send_heartbeats(self):
+        for name in self.name2nextIndex:
+            self.send_appendEntries(name, is_heartbeat=True)
+
+    def response_appendEntries(self, leader, success):
+        data = {
+            "type" : appendEntriesResponseType,
+            "term" : self.term,
+            "success" : success
+        }
+        data = json.dumps(data)
+        self.tcpServer.send(leader, data)
