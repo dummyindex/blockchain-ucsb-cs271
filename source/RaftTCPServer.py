@@ -69,7 +69,7 @@ class RaftTCPServer():
             connection, client_address = sock.accept()
             data = obtain_data(connection)
             json_data = json.loads(data)
-            print("got data:", data)
+            # print("got data:", data)
             rpc_queue.put(json_data)
         
     def start_server(self, rpc_queue):
@@ -80,9 +80,13 @@ class RaftTCPServer():
         t1.start()
         
     def send(self, name, data):
-        port = self.name2outports[name]
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = (self.host, port)
-        sock.connect(server_address)
-        push_data(sock, data)
-        sock.close()
+        try:
+            port = self.name2outports[name]
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_address = (self.host, port)
+            sock.connect(server_address)
+            push_data(sock, data)
+            sock.close()
+        except:
+            print("NETWORK ISSUE (site failure?) => SEND FAILURE")
+        

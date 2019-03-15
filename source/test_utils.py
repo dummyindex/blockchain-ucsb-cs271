@@ -12,4 +12,10 @@ def simple_test_hash():
     print("SIMPLE TEST1 PASSED")
     return True
 
+def test_hash_encode_decode():
+    b = sha256_byte(sha256_str("21"), sha256_str("afqwfyubgfv2yi4t1"))
+    assert decode_bytes(encode_bytes(b)) == b
+    print("TEST HASH DECODE ENCODE CONSISTENCY PASSED")
+    
 simple_test_hash()
+test_hash_encode_decode()

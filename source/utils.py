@@ -1,6 +1,13 @@
 import hashlib
 import os
 import random
+import base64
+
+def encode_bytes(b):
+    return b.hex()
+
+def decode_bytes(s):
+    return bytes.fromhex(s)
 
 def sha256_str(s):
     return hashlib.sha256(s.encode('utf-8')).digest()
@@ -18,7 +25,9 @@ def is_last_byte_valid(hash_val):
     '''
     assert len(hash_val) == 32
     last = hash_val[-1]
-    res = last == ord('0') or last == ord('1') or last == ord('2')
+    # res = last == ord('0') or last == ord('1') or last == ord('2')
+    digit = last % 10
+    res = last == 0 or last == 1 or last ==2
     return res
 
 def gen_nonce(nonce_len=32):
@@ -46,7 +55,7 @@ def find_valid_nonce(t1, t2):
         nonce = gen_nonce()
     return nonce
 
-def gen_timeout(t=1):
+def gen_timeout(t=4):
     '''
     t : timeout
     return timeout in [t, 2t]
