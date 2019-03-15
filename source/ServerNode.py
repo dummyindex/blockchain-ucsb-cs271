@@ -72,6 +72,30 @@ class ServerNode():
             self.name2lastReqTime[name] = time.time()
 
         self.init_txns_list(init_txns)
+        self.client2init_balance = {}
+        for client in client_configs:
+            self.client2init_balance[client] = float(client_configs[client]["initial_amount"])
+        print("init balance:", self.client2init_balance)
+
+    def calculate_balance(self):
+        client2balance = {}
+        for client in self.client2init_balance:
+            balance = self.client2init_balance[client]
+            for block in self.block_chain.chain:
+                t = block.ta.split()
+                if len(t) != 3:
+                    continue
+                if t[0] == client:
+                    balance -= float(t[2])
+                elif t[1] == client:
+                    balance += float(t[2])
+                t = block.tb.split()
+                if t[0] == client:
+                    balance -= float(t[2])
+                elif t[1] == client:
+                    balance += float(t[2])
+            client2balance[client] = balance
+        return client2balance
 
     def init_txns_list(self, txns):
         i = 0 
@@ -83,6 +107,7 @@ class ServerNode():
         if i == len(txns)-1:
             self.txn_buffer = [(txns[i], (None, None))]
 
+        self.block_chain.print_chain()
 
     def start(self):
         self.last_refresh_time = time.time()
@@ -259,6 +284,7 @@ class ServerNode():
         
         # append new entries
         self.block_chain.update_chain_at(prevLogIndex+1, block_list)
+        self.block_chain.commitIndex = commitIndex
         # advance state machine - balance
 
         # respond
@@ -543,11 +569,14 @@ class ServerNode():
         self.tcpServer.send(leader, data)
 
     def response_client_txn(self, txn_info):
+        client = txn_info[0]
+        client2balance = self.calculate_balance()
         data = {
             "type" : txnCommitType,
             "term" : self.term,
             "source" : self.name,
-            "txn_id" : txn_info[1]
+            "txn_id" : txn_info[1],
+            "balance" :  client2balance[client]
         }
         print("-----response txn")
         data = json.dumps(data)
