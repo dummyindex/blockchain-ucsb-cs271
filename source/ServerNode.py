@@ -30,7 +30,6 @@ class ServerNode():
         self.config = config
         self.role = follower_role
         self.election_timeout = gen_timeout()
-        self.is_timeout_thread = threading.Event()
         self.vote_for = None
         self.received_vote = 0
         self.block_chain = BlockChain()
@@ -46,8 +45,8 @@ class ServerNode():
 
         self.timeout_thread = threading.Thread(
             target=self.check_time_out, daemon=True)
-        self.notify_timeout_event = threading.Event()
-        self.notify_timeout_event.clear()
+        self.notify_timeout_thread_refresh_time_event = threading.Event()
+        self.notify_timeout_thread_refresh_time_event.clear()
 
     def start(self):
         self.last_refresh_time = time.time()
@@ -64,7 +63,7 @@ class ServerNode():
 
     def update_refresh_time(self):
         self.last_refresh_time = time.time()
-        self.notify_timeout_event.set()
+        self.notify_timeout_thread_refresh_time_event.set()
 
     def trans_candidate(self):
         self.update_refresh_time()
@@ -94,9 +93,9 @@ class ServerNode():
     def check_time_out(self):
         self.last_refresh_time = time.time()
         while True:
-            if self.notify_timeout_event.is_set():
+            if self.notify_timeout_thread_refresh_time_event.is_set():
                 self.last_refresh_time = time.time()
-                self.notify_timeout_event.clear()
+                self.notify_timeout_thread_refresh_time_event.clear()
 
             is_timeout = (
                 time.time() - self.last_refresh_time) > self.election_timeout
@@ -164,12 +163,10 @@ class ServerNode():
             assert req['term'] <= self.term
             self.received_vote += 1
             if self.received_vote >= majority:
-                self.is_timeout_thread.clear()
                 self.trans_leader()
 
         if req['term'] > self.term:
             self.term = req['term']
-            self.is_timeout_thread.clear()
             self.trans_follower()
 
     def handle_clientCommand(self, req):
@@ -195,7 +192,7 @@ class ServerNode():
         elif req_type == voteResponseType:
             # self.update_refresh_time()
             self.handle_voteResponse_req(req)
-        if req_type == clientCommandType:
+        elif req_type == clientCommandType:
             if self.role == follower_role:
                 pass
                 # redirect to current leader

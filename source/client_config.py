@@ -20,8 +20,8 @@ clientC = {
 
 clients = {
     "A": clientA,
-    "B": clientA,
-    "C": clientA
+    "B": clientB,
+    "C": clientC
 }
 
 with open('input_file.txt', 'r') as myfile:
