@@ -23,6 +23,7 @@ def start_all_servers():
         servers[-1].start()
     return servers
 
+
 class ServerNode():
     def __init__(self, config_name, configs):
         config = configs[config_name]
@@ -30,7 +31,6 @@ class ServerNode():
         self.config = config
         self.role = follower_role
         self.election_timeout = gen_timeout()
-        self.is_timeout_thread = threading.Event()
         self.vote_for = None
         self.received_vote = 0
         self.block_chain = BlockChain()
@@ -164,12 +164,10 @@ class ServerNode():
             assert req['term'] <= self.term
             self.received_vote += 1
             if self.received_vote >= majority:
-                self.is_timeout_thread.clear()
                 self.trans_leader()
 
         if req['term'] > self.term:
             self.term = req['term']
-            self.is_timeout_thread.clear()
             self.trans_follower()
 
     def handle_clientCommand(self, req):
