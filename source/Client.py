@@ -52,6 +52,18 @@ class Client():
         self.balance = float(req['balance'])
         print("updated balance:", self.balance)
 
+    def handle_printBalance(self, req):
+        print("balance from server:", req['balance'])
+        block_chain = req['blockchain']
+        print("========================================")
+        index = 0
+        for block in block_chain:
+            print("++++++++++++++++++++++++++++++++++++++++")
+            print("index:" ,index)
+            index += 1
+            Block.from_dict(block).print_block()
+        print("========================================")
+
     def handle_cmds(self):
         self.txns = {}
         last_upload_time = time.time()
@@ -63,7 +75,8 @@ class Client():
                 req_type = req['type']
                 if req_type == txnCommitType:
                     self.handle_complete_txn(req)
-
+                elif req_type == printBalanceType:
+                    self.handle_printBalance(req)
             # transaction
             if time.time() - last_upload_time > interval:
                 while not self.txn_queue.empty():
@@ -99,11 +112,28 @@ class Client():
     def update_client(self):
         pass
 
+    def request_balance(self):
+        data = {
+            'type': printBalanceType,
+            'source' : self.name
+        }
+        
+        leader = self.estimate_leader
+        if self.estimate_leader == None:
+            leader = random.choice(self.server_names)
+        for leader in self.server_names:
+            print("print balance from", leader)
+            str_data = json.dumps(data)
+            self.tcpServer.send(leader, str_data)
+
     def handle_userInput(self):
         while True:
             #print('Please add transaction in format: Client1 Client2 Amount')
             input_txn = input('Input transactionFormat(ta tb amount)/printBalance/printBlockChain\n')
-            self.upload_transaction(input_txn)
+            if input_txn.lower() == "printbalance":
+                self.request_balance()
+            else:
+                self.upload_transaction(input_txn)
             
     def upload_transaction(self, input_txn):
         parsed_txn = input_txn.split()

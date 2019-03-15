@@ -16,6 +16,7 @@ appendEntriesResponseType = "appendEntriesResponseType"
 startElectionType = "startElection"
 clientCommandType = "clientCommand"
 txnCommitType = "txnCommit"
+printBalanceType = "printBalance"
 
 
 def start_all_servers():
@@ -27,7 +28,7 @@ def start_all_servers():
 
 
 class ServerNode():
-    def __init__(self, config_name, configs, client_configs, avg_election_timeout=0.5,
+    def __init__(self, config_name, configs, client_configs, avg_election_timeout=10,
                  init_txns=None):
         config = configs[config_name]
         self.name = config_name
@@ -81,7 +82,8 @@ class ServerNode():
         client2balance = {}
         for client in self.client2init_balance:
             balance = self.client2init_balance[client]
-            for block in self.block_chain.chain[:self.block_chain.commitIndex + 1]:
+            # for block in self.block_chain.chain[:self.block_chain.commitIndex + 1]:
+            for block in self.block_chain.chain[:]:
                 t = block.ta.split()
                 if len(t) != 3:
                     continue
@@ -107,6 +109,7 @@ class ServerNode():
         if i == len(txns)-1:
             self.txn_buffer = [(txns[i], (None, None))]
 
+        self.block_chain.commitIndex = len(self.block_chain) - 1
         self.block_chain.print_chain()
 
     def start(self):
@@ -413,6 +416,22 @@ class ServerNode():
             self.name2nextIndex[name] -= 1
             assert self.name2nextIndex[name] >= 0
 
+    def handle_printBalance_req(self, req):
+        print("----commit index:", self.block_chain.get_commitIndex())
+        if self.role != leader_role:
+            return
+        print("-----print balance")
+        client = req['source']
+        client2balance = self.calculate_balance()
+        data = {
+            "type" : printBalanceType,
+            "source" : self.name,
+            "balance" :  client2balance[client],
+            "blockchain": self.block_chain.get_entries_start_at_list(0)
+        }
+        data = json.dumps(data)
+        self.tcpServer.send(client, data)
+
     def handle_clientCommand_req(self, req):
         '''
         data = {
@@ -483,6 +502,7 @@ class ServerNode():
                 self.crash_list.append(name)
 
     def handle_req(self, req):
+        # print("req:", req, type(req))
         req_type = req["type"]
         self.update_last_req_time(req)
         if req_type == startElectionType:
@@ -498,6 +518,8 @@ class ServerNode():
             self.handle_appendEntriesResponse_req(req)
         elif req_type == clientCommandType:
             self.handle_clientCommand_req(req)
+        elif req_type == printBalanceType:
+            self.handle_printBalance_req(req)
         else:
             print("not implemented:", req)
 
@@ -512,7 +534,7 @@ class ServerNode():
                 self.leader_update_followers()
             while not self.rpc_queue.empty():
                 req = self.rpc_queue.get()
-                print(self.name, self.term, ":", req)
+                print(self.name, "term", self.term, ":", req)
                 self.handle_req(req)
         return
 
@@ -592,6 +614,7 @@ class ServerNode():
         interval = self.avg_election_timeout/5
         for name in self.name2nextIndex:
             nextIndex = self.name2nextIndex[name]
+            # print("--------", self.block_chain.lastLogIndex(), nextIndex)
             if self.block_chain.lastLogIndex() < nextIndex:
                 # heartbeat
                 if time.time() -  self.name2lastContactTime[name] > interval:

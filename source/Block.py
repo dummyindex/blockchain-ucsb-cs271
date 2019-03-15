@@ -92,8 +92,8 @@ class BlockChain():
     def update_chain_at(self, start, block_list):
         # no need to calculate previous block's hash again
         self.chain = self.chain[:start]
-        for i in range(start, len(self.chain)):
-            self.chain.append(block_list[i - start])
+        for i in range(len(block_list)):
+            self.chain.append(block_list[i])
 
     def commit_next(self):
         print("----commit")
