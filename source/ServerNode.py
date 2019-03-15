@@ -26,12 +26,13 @@ def start_all_servers():
 
 
 class ServerNode():
-    def __init__(self, config_name, configs):
+    def __init__(self, config_name, configs, avg_election_timeout=10):
         config = configs[config_name]
         self.name = config_name
         self.config = config
         self.role = follower_role
-        self.election_timeout = gen_timeout()
+        self.avg_election_timeout = avg_election_timeout
+        self.election_timeout = gen_timeout(self.avg_election_timeout)
         self.vote_for = None
         self.received_vote = 0
         self.block_chain = BlockChain()
@@ -127,8 +128,10 @@ class ServerNode():
         print("========================")
         self.role = leader_role
         self.name2nextIndex = {}
+        self.name2lastContactTime = {}
         for name in self.other_names:
             self.name2nextIndex[name] = self.block_chain.lastLogIndex()
+            self.name2lastContactTime[name] = time.time()
         self.send_heartbeats() # send heartbeats immediately
         self.heartbeat_end_event.clear()
         self.heartbeat_thread = threading.Thread(
@@ -193,6 +196,7 @@ class ServerNode():
 
         prevLogIndex =  req['prevLogIndex']
         prevLogTerm = req['prevLogTerm']
+        commitIndex = req['commitIndex']
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
             self.response_appendEntries(leader, False, prevLogIndex)
@@ -225,7 +229,7 @@ class ServerNode():
             print("%s grant vote to %s at term %d" % (self.name, candidate, self.term))
             self.vote_for = req['source']
             self.response_vote(candidate, True)
-            self.election_timeout = gen_timeout()
+            self.election_timeout = gen_timeout(self.avg_election_timeout)
             self.update_refresh_time()
         else:
             self.response_vote(candidate, False)
@@ -390,3 +394,14 @@ class ServerNode():
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)
+
+    def leader_update_followers(self):
+        assert self.role == leader_role
+        interval = self.avg_election_timeout/3
+        for name in self.name2nextIndex:
+            nextIndex = self.name2nextIndex[name]
+            if self.block_chain.lastLogIndex() < nextIndex:
+                continue
+            last_time = self.name2lastContactTime[name]
+            if time.time() - last_time > interval:
+                pass
