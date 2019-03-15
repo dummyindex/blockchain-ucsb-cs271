@@ -5,34 +5,35 @@ import threading
 import socket
 import json
 
-from client_config import *
+from network_config import *
 from ServerNode import *
 from utils import *
 from utils import *
 
-
 class Client():
-    def __init__(self, client_id):
-        config = clients[client_id]
-        self.id = client_id
+    def __init__(self, client_name, server_configs, client_configs):
+        config = client_configs[client_name]
         self.name = config["name"]
         self.config = config
         self.initial_unit = config["initial_amount"]
-        self.send_port = None
-        self.recv_port = config["recv_port"]
         self.current_txn = None
-        self.host = 'localhost'
+        self.server_names = list(server_configs.keys())
+        all_configs = dict(server_configs)
+        all_configs.update(client_configs)
+        self .tcpServer = RaftTCPServer(self.name, all_configs)
+        self.rpc_queue = queue.Queue()
+        self.txn_queue = queue.Queue()
+        self.txn_id = 0
+        self.estimate_leader = None
+        self.id2amount = {}
+        self.balance = config["initial_amount"]
+        self.cmd_thread = threading.Thread(
+            target=self.handle_cmds, daemon=True)
 
-        self.recv_thread = threading.Thread(
-            target=self.start_clientTCP)
-        self.wait_userInput_thread = threading.Thread(
-            target=self.handle_userInput)
-
-        self.start_client()
-
-    def start_client(self):
-        self.recv_thread.start()
-        self.wait_userInput_thread.start()
+    def start(self):
+        self.tcpServer.start_server(self.rpc_queue)
+        self.cmd_thread.start()
+        self.handle_userInput()
 
     def add_transaction(self):
         '''
@@ -40,47 +41,60 @@ class Client():
         '''
         pass
 
-    def estimate_leader(self):
-        '''
-        Todo: estimate current leader
-        set server1 recv_port
-        '''
-        self.send_port = 8932
+    def handle_complete_txn(self, req):
+        print("---complete")
+        txn_id = req['txn_id']
+        if txn_id in self.txns:
+            self.txns.pop(txn_id)
+        else:
+            return
 
-    def send_clientCommand(self, parsed_txn):
+        self.balance -= self.id2amount[txn_id]
+        print("updated balance:", self.balance)
+
+    def handle_cmds(self):
+        self.txns = {}
+        last_upload_time = time.time()
+        interval = 1
+        while True:
+            # response
+            while not self.rpc_queue.empty():
+                req = self.rpc_queue.get()
+                req_type = req['type']
+                if req_type == txnCommitType:
+                    self.handle_complete_txn(req)
+
+            # transaction
+            if time.time() - last_upload_time > interval:
+                while not self.txn_queue.empty():
+                    ta, tb, amount, txn_id = self.txn_queue.get()
+                    assert not (txn_id in self.txns)
+                    self.txns[txn_id] = (ta, tb, amount)
+                last_upload_time = time.time()
+
+                for txn_id in self.txns:
+                    ta, tb, amount = self.txns[txn_id]
+                    self.send_clientCommand(ta, tb, amount, txn_id)
+
+            # print balance and block chain command
+
+    def send_clientCommand(self, ta, tb, amount, txn_id):
         data = {
             'type': clientCommandType,
-            'send_client': parsed_txn[0],
-            'recv_client': parsed_txn[1],
-            'amount': parsed_txn[2]
+            'send_client': ta,
+            'recv_client': tb,
+            'amount': amount,
+            'txn_id' : txn_id,
+            'source' : self.name
         }
-
-        self.estimate_leader()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = (self.host, self.send_port)
-        sock.connect(server_address)
-        push_data(sock, data)
-        sock.close()
-
-    def start_clientTCP(self):
-        print(f'Client {self.name} starting: ')
-        # Create a TCP/IP socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        # Bind the socket to the port
-        server_address = (self.host, self.recv_port)
-        print('starting up on {} port {}'.format(*server_address))
-        sock.bind(server_address)
-
-        # Listen for incoming connections
-        sock.listen(20)
-        while True:
-            # Wait for a connection
-            connection, server_address = sock.accept()
-            data = obtain_data(connection)
-            json_data = json.loads(data)
-            print("got data:", data)
-            self.update_client()
+        
+        leader = self.estimate_leader
+        if self.estimate_leader == None:
+            leader = random.choice(self.server_names)
+        print("sending txn to esitmated leader", leader)
+        data = json.dumps(data)
+        # print(data)
+        self.tcpServer.send(leader, data)
 
     def update_client(self):
         pass
@@ -88,23 +102,36 @@ class Client():
     def handle_userInput(self):
         while True:
             #print('Please add transaction in format: Client1 Client2 Amount')
-            input_txn = input()
-            print(f'User input transaction: {input_txn}')
-            self.parse_input_transaction(input_txn)
-
-    def parse_input_transaction(self, input_txn):
+            input_txn = input('Input transactionFormat(ta tb amount)/printBalance/printBlockChain\n')
+            self.upload_transaction(input_txn)
+            
+    def upload_transaction(self, input_txn):
         parsed_txn = input_txn.split()
+        if len(parsed_txn) != 3:
+            print("wrong format. enter ta, tb, tc")
+            return
+        ta = parsed_txn[0]
+        tb = parsed_txn[1]
+        amount = None
+        try:
+            amount = float(parsed_txn[2])
+        except:
+            print("enter numeric value for amount")
+            return
 
         if parsed_txn[0] != self.name:
-            print(f'The first client should be {self.name}')
-        else:
-            self.send_clientCommand(parsed_txn)
+            print('The first client should be %s' % (self.name))
+            return
+
+        self.txn_queue.put((ta, tb, amount, self.txn_id))
+        self.id2amount[self.txn_id] = amount
+        self.txn_id += 1
 
 
-def main():
-    client_id = int(sys.argv[1])
-    client = Client(client_id)
-
+def client_main():
+    client_name = sys.argv[1]
+    client = Client(client_name, server_configs, client_configs)
+    client.start()
 
 if __name__ == "__main__":
-    main()
+    client_main()
