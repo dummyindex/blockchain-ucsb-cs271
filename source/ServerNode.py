@@ -15,7 +15,7 @@ voteResponseType = "voteResponse"
 appendEntriesResponseType = "appendEntriesResponseType"
 startElectionType = "startElection"
 clientCommandType = "clientCommand"
-transRoleType = "transRole"
+txnCommitType = "txnCommit"
 
 
 def start_all_servers():
@@ -380,10 +380,17 @@ class ServerNode():
             send_client = req['send_client']
             recv_client = req['recv_client']
             amount = req['amount']
+            txn_id = req['txn_id']
+            client_name = req['source']
+
             temp = send_client + " " + recv_client + " " + str(amount)
-            self.txn_buffer.append(temp)
+            self.txn_buffer.append((temp, (client_name, txn_id)))
             if len(self.txn_buffer) == 2:
-                new_block = Block(self.txn_buffer[0], self.txn_buffer[1], self.term, self.block_chain.get(-1).hash())
+                new_block = Block(self.txn_buffer[0][0], self.txn_buffer[1][0], self.term, self.block_chain.get(-1).hash())
+                # client_name = txn_buffer[1][0]
+                # txn_id = txn_buffer[1][1]
+                txn_info_a = txn_buffer[0][1]
+                txn_info_b = txn_buffer[1][1]
                 self.block_chain.append(new_block)
                 txn_buffer = []
 

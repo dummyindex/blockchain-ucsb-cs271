@@ -87,6 +87,7 @@ class RaftTCPServer():
             sock.connect(server_address)
             push_data(sock, data)
             sock.close()
-        except:
+        except Exception as e:
+            print(e)
             print("NETWORK ISSUE (site failure?) => SEND FAILURE")
         
