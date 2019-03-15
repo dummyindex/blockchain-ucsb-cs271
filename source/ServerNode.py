@@ -81,7 +81,7 @@ class ServerNode():
         client2balance = {}
         for client in self.client2init_balance:
             balance = self.client2init_balance[client]
-            for block in self.block_chain.chain:
+            for block in self.block_chain.chain[:self.block_chain.commitIndex + 1]:
                 t = block.ta.split()
                 if len(t) != 3:
                     continue
