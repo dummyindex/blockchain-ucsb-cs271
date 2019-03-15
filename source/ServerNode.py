@@ -12,6 +12,8 @@ requestVoteType = "requestVote"
 appendEntryType = "appendEntry"
 voteResponseType = "voteResponse"
 startElectionType = "startElection"
+clientCommandType = "clientCommand"
+transRoleType = "transRole"
 
 
 def start_all_servers():
@@ -28,6 +30,7 @@ class ServerNode():
         self.config = config
         self.role = follower_role
         self.election_timeout = gen_timeout()
+        self.is_timeout_thread = threading.Event()
         self.vote_for = None
         self.received_vote = 0
         self.block_chain = BlockChain()
@@ -80,6 +83,13 @@ class ServerNode():
         print(self.name, "become leader, term=", self.term)
         print("========================")
         self.role = leader_role
+        '''
+        Todo: if leader has been elected
+        1. send heartbeat (empty AppendEntries)
+        2. receive client commd
+        3. logIndex >= nextIndex for a follower, send AppendEntries with log entries
+        4. N > commitIndex ?
+        '''
 
     def check_time_out(self):
         self.last_refresh_time = time.time()
@@ -154,11 +164,25 @@ class ServerNode():
             assert req['term'] <= self.term
             self.received_vote += 1
             if self.received_vote >= majority:
+                self.is_timeout_thread.clear()
                 self.trans_leader()
 
         if req['term'] > self.term:
             self.term = req['term']
+            self.is_timeout_thread.clear()
             self.trans_follower()
+
+    def handle_clientCommand(self, req):
+        '''
+        data = {
+            type: clientCommandType
+            transaction detail:
+                send_client
+                recv_client
+                amount
+        }
+        '''
+        pass
 
     def handle_req(self, req):
         req_type = req["type"]
@@ -171,6 +195,14 @@ class ServerNode():
         elif req_type == voteResponseType:
             # self.update_refresh_time()
             self.handle_voteResponse_req(req)
+        if req_type == clientCommandType:
+            if self.role == follower_role:
+                pass
+                # redirect to current leader
+            if self.role == leader_role:
+                self.handle_clientCommand(req)
+            if self.role == candidate_role:
+                pass
         else:
             print("not implemented:", req)
 
