@@ -63,3 +63,6 @@ class BlockChain():
 
     def lastLogIndex(self):
         return len(self.chain) - 1
+
+    def lastLogTerm(self):
+        return self.chain[-1].term

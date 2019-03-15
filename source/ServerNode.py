@@ -151,11 +151,14 @@ class ServerNode():
         data = json.dumps(data)
         self.tcpServer.send(candidate, data)
 
-    def is_completer_log(self, other_log):
+    def is_completer_log(self, lastLogIndex, lastLogTerm):
         '''
         todo
         '''
-        return True
+        not_completer = self.block_chain.lastLogTerm() > lastLogTerm or\
+                        (self.block_chain.lastLogTerm() == lastLogTerm and\
+                         self.block_chain.lastLogIndex() > lastLogIndex)
+        return not not_completer
 
     def handle_startElection_req(self, req):
         if self.role == leader_role:
@@ -178,7 +181,7 @@ class ServerNode():
         leader = req['leaderId']
         # not valid leader term case
         if self.term > term:
-            self.response_appendEntries(leader, False)
+            self.response_appendEntries(leader, False, -1)
             return
 
         if term > self.term:
@@ -192,12 +195,12 @@ class ServerNode():
         prevLogTerm = req['prevLogTerm']
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
-            self.response_appendEntries(leader, False)
+            self.response_appendEntries(leader, False, prevLogIndex)
             return
 
         # has matched block and is heartbeat
         if is_heartbeat:
-            self.response_appendEntries(leader, True)
+            self.response_appendEntries(leader, True, prevLogIndex)
         # todo - handle conflict
         
         # append new entries
@@ -208,7 +211,8 @@ class ServerNode():
     def handle_requestVote_req(self, req):
         candidate_term = req['term']
         candidate = req['source']
-        other_log = None
+        lastLogIndex = req['lastLogIndex']
+        lastLogTerm = req['lastLogTerm']
         if candidate_term > self.term:
             self.term = candidate_term
             # stepdown
@@ -217,7 +221,7 @@ class ServerNode():
 
         if candidate_term == self.term and\
            (self.vote_for == None or self.vote_for == candidate) and\
-           self.is_completer_log(other_log):
+           self.is_completer_log(lastLogIndex, lastLogTerm):
             print("%s grant vote to %s at term %d" % (self.name, candidate, self.term))
             self.vote_for = req['source']
             self.response_vote(candidate, True)
@@ -256,6 +260,42 @@ class ServerNode():
             self.term = req['term']
             self.trans_follower()
 
+
+    def update_success_appendEntry_at(self, name, prevId):
+        pass
+
+    def handle_appendEntriesResponse_req(self, req):
+        '''
+        only leader considers this message
+        when in other state (role), slow network may deliver previous
+        sent response, so need to check role
+        data = {
+            "type" : appendEntriesResponseType,
+            "term" : self.term,
+            "success" : success,
+            "source" : self.name,
+            "lastLogIndex" : prevLogIndex
+        }
+        '''
+        if self.role != leader_role:
+            return
+
+        term = req['term']
+        success = req['success']
+        name = req['source']
+        prevLogIndex = req['prevLogIndex']
+        # stepdown
+        if term > self.term:
+            assert not req['success']
+            self.trans_follower()
+            return
+
+        if success:
+            self.update_success_appendEntry_at(name, prevLogIndex)
+        else:
+            self.name2nextIndex[name] -= 1
+            assert self.name2nextIndex[name] >= 0
+
     def handle_clientCommand(self, req):
         '''
         data = {
@@ -279,6 +319,8 @@ class ServerNode():
             self.handle_voteResponse_req(req)
         elif req_type == appendEntriesType:
             self.handle_appendEntries_req(req)
+        elif req_type == appendEntriesResponseType:
+            self.handle_appendEntriesResponse_req(req)
         elif req_type == clientCommandType:
             if self.role == follower_role:
                 pass
@@ -338,11 +380,13 @@ class ServerNode():
         for name in self.name2nextIndex:
             self.send_appendEntries(name, is_heartbeat=True)
 
-    def response_appendEntries(self, leader, success):
+    def response_appendEntries(self, leader, success, prevLogIndex):
         data = {
             "type" : appendEntriesResponseType,
             "term" : self.term,
-            "success" : success
+            "success" : success,
+            "source" : self.name,
+            "prevLogIndex" : prevLogIndex
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)
