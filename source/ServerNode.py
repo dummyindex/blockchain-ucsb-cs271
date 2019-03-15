@@ -271,7 +271,6 @@ class ServerNode():
         majority = int(len(configs) / 2) + 1
         if req['voteGranted']:
             assert req['term'] <= self.term
-
             if req['term'] == self.term:
                 self.received_vote += 1
                 if self.received_vote >= majority:
@@ -282,7 +281,7 @@ class ServerNode():
             self.trans_follower()
 
 
-    def update_success_appendEntry_at(self, name, next_index):
+    def update_success_follower_log(self, name, next_index):
         self.name2loggedIndex[name].add(next_index-1)
         self.name2nextIndex[name] = next_index
         
@@ -345,7 +344,7 @@ class ServerNode():
             return
         
         if success:
-            self.update_success_appendEntry_at(name, next_index)
+            self.update_success_follower_log(name, next_index)
             self.check_update_commit()
         else:
             self.name2nextIndex[name] -= 1
