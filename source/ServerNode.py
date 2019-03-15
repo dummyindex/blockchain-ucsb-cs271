@@ -55,7 +55,10 @@ class ServerNode():
         self.heartbeat_thread = None
         self.heartbeat_end_event = threading.Event()
         self.heartbeat_end_event.clear()
+        self.leader = None
 
+        # for store client txn
+        self.txn_buffer = []
     def start(self):
         self.last_refresh_time = time.time()
         self.tcpServer.start_server(self.rpc_queue)
@@ -121,7 +124,8 @@ class ServerNode():
         assert self.heartbeat_thread == None
         self.role = follower_role
         self.vote_for = None
-
+        self.leader = None
+        
     def trans_leader(self):
         print("========================")
         print(self.name, "become leader, term", self.term, "votes", self.received_vote)
@@ -129,6 +133,7 @@ class ServerNode():
         self.role = leader_role
         self.name2nextIndex = {}
         self.name2lastContactTime = {}
+        self.txn_buffer = []
         for name in self.other_names:
             self.name2nextIndex[name] = self.block_chain.lastLogIndex()
             self.name2lastContactTime[name] = time.time()
@@ -190,6 +195,7 @@ class ServerNode():
         if term > self.term:
             self.term = term
 
+        self.leader = leader
         # stepdown
         if self.role == candidate_role or self.role == leader_role:
             self.trans_follower()
@@ -197,21 +203,28 @@ class ServerNode():
         prevLogIndex =  req['prevLogIndex']
         prevLogTerm = req['prevLogTerm']
         commitIndex = req['commitIndex']
+        block_list = req['entries']
+        block_list = [Block.from_dict(d) for d in block_list]
+        
+        # is heartbeat
+        if is_heartbeat:
+            self.response_appendEntries(leader, True, prevLogIndex, is_heartbeat=True)
+            return
+        
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
             self.response_appendEntries(leader, False, prevLogIndex)
             return
 
-        # has matched block and is heartbeat
-        if is_heartbeat:
-            self.response_appendEntries(leader, True, prevLogIndex)
         # todo - handle conflict
-        
         # append new entries
-
+        
+        self.block_chain.update_chain_at(prevLogIndex+1, block_list)
         # advance state machine - balance
 
-
+        # respond
+        self.response_appendEntries(leader, True, prevLogIndex)
+        
     def handle_requestVote_req(self, req):
         candidate_term = req['term']
         candidate = req['source']
@@ -278,7 +291,8 @@ class ServerNode():
             "term" : self.term,
             "success" : success,
             "source" : self.name,
-            "lastLogIndex" : prevLogIndex
+            "prevLogIndex" : prevLogIndex,
+            "is_heartbeat": is_heartbeat
         }
         '''
         if self.role != leader_role:
@@ -288,29 +302,53 @@ class ServerNode():
         success = req['success']
         name = req['source']
         prevLogIndex = req['prevLogIndex']
+        is_heartbeat = req['is_heartbeat']
+
         # stepdown
         if term > self.term:
             assert not req['success']
             self.trans_follower()
             return
-
+        
+        if is_heartbeat:
+            return
+        
         if success:
             self.update_success_appendEntry_at(name, prevLogIndex)
         else:
             self.name2nextIndex[name] -= 1
             assert self.name2nextIndex[name] >= 0
 
-    def handle_clientCommand(self, req):
+    def handle_clientCommand_req(self, req):
         '''
         data = {
             type: clientCommandType
-            transaction detail:
-                send_client
-                recv_client
-                amount
+            send_client:
+            recv_client:
+            amount:
         }
         '''
-        pass
+        if self.role == candidate_role:
+            # discard, let client reissue
+            return
+        elif self.role == follower_role:
+            # redirect
+            name = self.leader
+            if self.leader == None:
+                if len(self.other_names) == 0:
+                    return
+                name = self.other_names[0]
+            self.redirect_clientCommand(name, req)
+        elif self.role == leader_role:
+            send_client = req['send_client']
+            recv_client = req['recv_client']
+            amount = req['amount']
+            temp = send_client + " " + recv_client + " " + str(amount)
+            self.txn_buffer.append(temp)
+            if len(self.txn_buffer) == 2:
+                new_block = Block(self.txn_buffer[0], self.txn_buffer[1], self.term, self.block_chain.get(-1).hash())
+                self.block_chain.append(new_block)
+                txn_buffer = []
 
     def handle_req(self, req):
         req_type = req["type"]
@@ -326,13 +364,7 @@ class ServerNode():
         elif req_type == appendEntriesResponseType:
             self.handle_appendEntriesResponse_req(req)
         elif req_type == clientCommandType:
-            if self.role == follower_role:
-                pass
-                # redirect to current leader
-            if self.role == leader_role:
-                self.handle_clientCommand(req)
-            if self.role == candidate_role:
-                pass
+            self.handle_clientCommand_req(req)
         else:
             print("not implemented:", req)
 
@@ -341,6 +373,8 @@ class ServerNode():
         todo: dispatch all reqs here
         '''
         while True:
+            if self.role == leader_role:
+                self.leader_update_followers()
             if self.rpc_queue.empty():
                 continue
             req = self.rpc_queue.get()
@@ -384,16 +418,21 @@ class ServerNode():
         for name in self.name2nextIndex:
             self.send_appendEntries(name, is_heartbeat=True)
 
-    def response_appendEntries(self, leader, success, prevLogIndex):
+    def response_appendEntries(self, leader, success, prevLogIndex, is_heartbeat=False):
         data = {
             "type" : appendEntriesResponseType,
             "term" : self.term,
             "success" : success,
             "source" : self.name,
-            "prevLogIndex" : prevLogIndex
+            "prevLogIndex" : prevLogIndex,
+            "is_heartbeat": is_heartbeat
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)
+
+    def redirect_clientCommand(self, name, req):
+        data = json.dumps(req)
+        self.tcpServer.send(name, data)
 
     def leader_update_followers(self):
         assert self.role == leader_role
@@ -401,7 +440,13 @@ class ServerNode():
         for name in self.name2nextIndex:
             nextIndex = self.name2nextIndex[name]
             if self.block_chain.lastLogIndex() < nextIndex:
+                # heartbeat
+                if time.time() -  self.name2lastContactTime[name] > interval:
+                    self.send_appendEntries(name, is_heartbeat=True)
+                    self.name2lastContactTime[name] = time.time()
                 continue
-            last_time = self.name2lastContactTime[name]
-            if time.time() - last_time > interval:
-                pass
+            
+            if time.time() - self.name2lastContactTime[name] > interval:
+                self.send_appendEntries(name, False)
+                self.name2lastContactTime[name] = time.time()
+        
