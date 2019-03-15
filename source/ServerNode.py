@@ -59,6 +59,10 @@ class ServerNode():
 
         # for store client txn
         self.txn_buffer = []
+
+        # log commit info
+        self.name2loggedIndex = None
+        
     def start(self):
         self.last_refresh_time = time.time()
         self.tcpServer.start_server(self.rpc_queue)
@@ -133,15 +137,17 @@ class ServerNode():
         self.role = leader_role
         self.name2nextIndex = {}
         self.name2lastContactTime = {}
+        self.name2loggedIndex = {}
         self.txn_buffer = []
         for name in self.other_names:
             self.name2nextIndex[name] = self.block_chain.lastLogIndex() + 1
             self.name2lastContactTime[name] = time.time()
+            self.name2loggedIndex[name] = set()
         self.send_heartbeats() # send heartbeats immediately
         self.heartbeat_end_event.clear()
         # self.heartbeat_thread = threading.Thread(
         #     target=self.heartbeat_leader_thread, daemon=True)
-        # self.heartbeat_thread.start()
+        # self.heartbeat_thread.start()        
         '''
         Todo: if leader has been elected
         1. send heartbeat (empty AppendEntries)
@@ -188,9 +194,14 @@ class ServerNode():
         term = req['term']
         leader = req['leaderId']
         prevLogIndex = req['prevLogIndex']
+        prevLogTerm = req['prevLogTerm']
+        commitIndex = req['commitIndex']
+        block_list = req['entries']
+        block_list = [Block.from_dict(d) for d in block_list]
+        next_id = prevLogIndex + len(block_list) + 1
         # not valid leader term case
         if self.term > term:
-            self.response_appendEntries(leader, False, prevLogIndex)
+            self.response_appendEntries(leader, False, prevLogIndex, next_id)
             return
 
         if term > self.term:
@@ -200,30 +211,23 @@ class ServerNode():
         # stepdown
         if self.role == candidate_role or self.role == leader_role:
             self.trans_follower()
-
-        prevLogTerm = req['prevLogTerm']
-        commitIndex = req['commitIndex']
-        block_list = req['entries']
-        block_list = [Block.from_dict(d) for d in block_list]
         
         # is heartbeat
         if is_heartbeat:
-            self.response_appendEntries(leader, True, prevLogIndex, is_heartbeat=True)
+            self.response_appendEntries(leader, True, prevLogIndex, next_id, is_heartbeat=True)
             return
         
         assert prevLogIndex >= 0
         if not self.has_matched_block(prevLogIndex, prevLogTerm):
-            self.response_appendEntries(leader, False, prevLogIndex)
+            self.response_appendEntries(leader, False, prevLogIndex, next_id)
             return
-
-        # todo - handle conflict
-        # append new entries
         
+        # append new entries
         self.block_chain.update_chain_at(prevLogIndex+1, block_list)
         # advance state machine - balance
 
         # respond
-        self.response_appendEntries(leader, True, prevLogIndex)
+        self.response_appendEntries(leader, True, prevLogIndex, next_id)
         
     def handle_requestVote_req(self, req):
         candidate_term = req['term']
@@ -278,9 +282,30 @@ class ServerNode():
             self.trans_follower()
 
 
-    def update_success_appendEntry_at(self, name, prevId):
-        pass
+    def update_success_appendEntry_at(self, name, next_index):
+        self.name2loggedIndex[name].add(next_index-1)
+        self.name2nextIndex[name] = next_index
+        
+    def majority(self):
+        return int(len(configs)/2)+1
 
+    def count_logged_follower_num(self, i):
+        count = 0
+        for name in self.name2loggedIndex:
+            for index in self.name2loggedIndex[name]:
+                if i <= index:
+                    count += 1
+                    break
+                
+    def check_update_commit(self):
+        start = self.block_chain.get_commitIndex() + 1
+        end = len(self.block_chain)
+        for i in range(start, end):
+            if self.count_logged_follower_num(i) >= self.majority():
+                self.block_chain.commit_next()
+            else:
+                break
+            
     def handle_appendEntriesResponse_req(self, req):
         '''
         only leader considers this message
@@ -303,7 +328,7 @@ class ServerNode():
         name = req['source']
         prevLogIndex = req['prevLogIndex']
         is_heartbeat = req['is_heartbeat']
-
+        next_index = req['next_index']
         # stepdown
         if term > self.term:
             assert not req['success']
@@ -320,7 +345,8 @@ class ServerNode():
             return
         
         if success:
-            self.update_success_appendEntry_at(name, prevLogIndex)
+            self.update_success_appendEntry_at(name, next_index)
+            self.check_update_commit()
         else:
             self.name2nextIndex[name] -= 1
             assert self.name2nextIndex[name] >= 0
@@ -424,14 +450,15 @@ class ServerNode():
         for name in self.name2nextIndex:
             self.send_appendEntries(name, is_heartbeat=True)
 
-    def response_appendEntries(self, leader, success, prevLogIndex, is_heartbeat=False):
+    def response_appendEntries(self, leader, success, prevLogIndex, next_index, is_heartbeat=False):
         data = {
             "type" : appendEntriesResponseType,
             "term" : self.term,
             "success" : success,
             "source" : self.name,
             "prevLogIndex" : prevLogIndex,
-            "is_heartbeat": is_heartbeat
+            "is_heartbeat": is_heartbeat,
+            "next_index": next_index
         }
         data = json.dumps(data)
         self.tcpServer.send(leader, data)

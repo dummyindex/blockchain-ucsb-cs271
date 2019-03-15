@@ -47,7 +47,7 @@ class BlockChain():
     def __init__(self):
         self.chain = [Block.create_dummy_block()]
         self.commitIndex = 0
-
+        
     def append(self, block):
         self.chain.append(block)
 
@@ -83,3 +83,6 @@ class BlockChain():
         for i in range(start, len(self.chain)):
             self.chain.append(block_list[i - start])
             
+    def commit_next(self):
+        self.commitIndex += 1
+        
