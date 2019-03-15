@@ -2,13 +2,15 @@ from utils import *
 
 
 class Block:
-    def __init__(self, ta, tb, term, prev_header_hash):
+    def __init__(self, ta, tb, term, prev_header_hash, nonce=None):
         self.ta = ta
         self.tb = tb
         self.term = term
         self.prev_header_hash = prev_header_hash
         self.txn_hash = sha256_byte(sha256_str(ta) + sha256_str(tb))
-        self.nonce = find_valid_nonce(ta, tb)
+        self.nonce = nonce
+        if nonce == None:
+            self.nonce = find_valid_nonce(ta, tb)
         self.final_hash = sha256_byte(self.txn_hash + self.nonce)
 
     def hash(self):
@@ -32,6 +34,14 @@ class Block:
             "txn_hash": encode_bytes(self.txn_hash),
             "final_hash": encode_bytes(self.final_hash)
         }
+
+    def from_dict(d):
+        ta = d["txns"][0]
+        tb = d["txns"][1]
+        nonce = decode_bytes(d["nonce"])
+        term = d["term"]
+        prev_header_hash = decode_bytes(d["prev_header_hash"])
+        return Block(ta, tb, term, prev_header_hash, nonce)
 
 class BlockChain():
     def __init__(self):
