@@ -1,3 +1,4 @@
+import sys
 import time
 from utils import *
 import queue
@@ -20,13 +21,13 @@ transRoleType = "transRole"
 def start_all_servers():
     servers = []
     for name in configs:
-        servers.append(ServerNode(name, configs))
+        servers.append(ServerNode(name, configs, client_configs))
         servers[-1].start()
     return servers
 
 
 class ServerNode():
-    def __init__(self, config_name, configs, avg_election_timeout=0.5):
+    def __init__(self, config_name, configs, client_configs, avg_election_timeout=0.5):
         config = configs[config_name]
         self.name = config_name
         self.config = config
@@ -42,7 +43,9 @@ class ServerNode():
         self.last_refresh_time = time.time()
         #  RPC queue
         self.rpc_queue = queue.Queue()
-        self.tcpServer = RaftTCPServer(self.name, configs)
+        all_configs = dict(configs)
+        all_configs.update(client_configs)
+        self.tcpServer = RaftTCPServer(self.name, all_configs)
         self.handler_thread = threading.Thread(
             target=self.handle_rpc_queue, daemon=True)
 
@@ -68,7 +71,9 @@ class ServerNode():
         self.tcpServer.start_server(self.rpc_queue)
         self.handler_thread.start()
         self.timeout_thread.start()
-
+        while True:
+            # handle user input?
+            pass
     def heartbeat_leader_thread(self):
         last_time = time.time()
         interval = self.election_timeout/3.0
@@ -84,8 +89,7 @@ class ServerNode():
 
     def add_election_req(self, role):
         req = {
-            "type": startElectionType,
-            "role": role
+            "type": startElectionType
         }
         self.rpc_queue.put(req)
 
@@ -97,7 +101,7 @@ class ServerNode():
         self.last_refresh_time = time.time()
         while True:
             if self.notify_timeout_thread_refresh_time_event.is_set():
-                print("timeout thread refreshing....")
+                # print("timeout thread refreshing....")
                 self.last_refresh_time = time.time()
                 self.notify_timeout_thread_refresh_time_event.clear()
 
@@ -337,7 +341,7 @@ class ServerNode():
         # corner case: append sent in previous terms
         # just returned, meaningless
         if term < self.term:
-            assert not req['success']
+            # assert not req['success']
             return
         
         if is_heartbeat:
@@ -482,3 +486,12 @@ class ServerNode():
                 self.send_appendEntries(name, False)
                 self.name2lastContactTime[name] = time.time()
         
+
+def main():
+    server_name = sys.argv[1]
+    server = ServerNode(server_name, configs, client_configs)
+    server.start()
+
+
+if __name__ == "__main__":
+    main()

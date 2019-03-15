@@ -25,3 +25,37 @@ configs = {
     "B": config1,
     "C": config2
 }
+
+start_port = 5000
+clientA = {
+    "send_port": start_port+1,
+    "recv_port": start_port+2,
+    "name": "clientA",
+    "initial_amount": 100
+}
+clientB = {
+    "send_port": start_port+3,
+    "recv_port": start_port+4,
+    "name": "clientB",
+    "initial_amount": 100
+}
+clientC = {
+    "send_port": start_port+5,
+    "recv_port": start_port+6,
+    "name": "clientC",
+    "initial_amount": 100
+}
+
+
+client_configs = {
+    "clientA": clientA,
+    "clientB": clientB,
+    "clientC": clientC
+}
+
+all_configs = dict(configs)
+all_configs.update(client_configs)
+
+with open('input_file.txt', 'r') as myfile:
+    content = myfile.readlines()
+transaction_list = [x.strip() for x in content]
