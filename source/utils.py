@@ -17,10 +17,10 @@ def is_last_byte_valid(hash_val):
     output : name
     '''
     assert len(hash_val) == 32
-    last = hash_val[-1]
+    last = hash_val[0]
     # res = last == ord('0') or last == ord('1') or last == ord('2')
     digit = last % 10
-    res = last == 0 or last == 1 or last == 2
+    res = last == 0 or last == 1 or last ==2
     return res
 
 def gen_nonce(nonce_len=32):
