@@ -116,3 +116,10 @@ class BlockChain():
                 return True
 
         return False
+
+    def has_txn(self, info):
+        for i in range(len(self.chain)):
+            if info in self.chain[i].infos:
+                return True
+        return False
+

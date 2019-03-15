@@ -27,7 +27,8 @@ def start_all_servers():
 
 
 class ServerNode():
-    def __init__(self, config_name, configs, client_configs, avg_election_timeout=0.5):
+    def __init__(self, config_name, configs, client_configs, avg_election_timeout=0.5,
+                 init_txns=None):
         config = configs[config_name]
         self.name = config_name
         self.config = config
@@ -69,6 +70,20 @@ class ServerNode():
         self.name2lastReqTime = {}
         for name in self.other_names:
             self.name2lastReqTime[name] = time.time()
+
+        self.init_txns_list(init_txns)
+
+    def init_txns_list(self, txns):
+        i = 0 
+        while i + 1 < len(txns):
+            j = i + 1
+            new_block = Block(txns[i], txns[j], self.term, self.block_chain.get(-1).hash())
+            self.block_chain.append(new_block)
+            i += 2
+        if i == len(txns)-1:
+            self.txn_buffer = [(txns[i], (None, None))]
+
+
     def start(self):
         self.last_refresh_time = time.time()
         # for testing
@@ -156,7 +171,8 @@ class ServerNode():
         self.name2lastContactTime = {}
         self.name2lastReqTime = {}
         self.name2loggedIndex = {}
-        self.txn_buffer = []
+
+        # self.txn_buffer = []
         for name in self.other_names:
             self.name2nextIndex[name] = self.block_chain.lastLogIndex() + 1
             self.name2lastContactTime[name] = time.time()
@@ -404,6 +420,13 @@ class ServerNode():
             if self.block_chain.txn_committed(txn_info):
                 self.response_client_txn(txn_info)
                 return
+            if self.block_chain.has_txn(txn_info):
+                # do nothing, wait for commit
+                return
+            if len(self.txn_buffer)==1:
+                if self.txn_buffer[0][1] == txn_info:
+                    return
+
             self.txn_buffer.append((temp, txn_info))
             if len(self.txn_buffer) == 2:
                 new_block = Block(self.txn_buffer[0][0], self.txn_buffer[1][0], self.term, self.block_chain.get(-1).hash())
@@ -422,7 +445,7 @@ class ServerNode():
         name = req['source']
         # only considers server name
         if name in self.other_names:
-            self.name2lastReqTime[name] = name
+            self.name2lastReqTime[name] = time.time()
 
     def update_crash_list(self):
         if self.role == follower_role:
@@ -554,7 +577,7 @@ class ServerNode():
 
 def main():
     server_name = sys.argv[1]
-    server = ServerNode(server_name, configs, client_configs)
+    server = ServerNode(server_name, configs, client_configs, init_txns=transaction_list)
     server.start()
 
 

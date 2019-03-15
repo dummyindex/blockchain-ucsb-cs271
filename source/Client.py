@@ -44,15 +44,18 @@ class Client():
     def handle_complete_txn(self, req):
         print("---complete")
         txn_id = req['txn_id']
-        self.balance -= self.id2amount[txn_id]
         if txn_id in self.txns:
             self.txns.pop(txn_id)
+        else:
+            return
+
+        self.balance -= self.id2amount[txn_id]
         print("updated balance:", self.balance)
 
     def handle_cmds(self):
         self.txns = {}
         last_upload_time = time.time()
-        interval = 0.3
+        interval = 1
         while True:
             # response
             while not self.rpc_queue.empty():
