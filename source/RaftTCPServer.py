@@ -80,9 +80,13 @@ class RaftTCPServer():
         t1.start()
         
     def send(self, name, data):
-        port = self.name2outports[name]
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = (self.host, port)
-        sock.connect(server_address)
-        push_data(sock, data)
-        sock.close()
+        try:
+            port = self.name2outports[name]
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_address = (self.host, port)
+            sock.connect(server_address)
+            push_data(sock, data)
+            sock.close()
+        except:
+            print("NETWORK ISSUE (site failure?) => SEND FAILURE")
+        

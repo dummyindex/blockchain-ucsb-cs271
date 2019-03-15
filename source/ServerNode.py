@@ -26,7 +26,7 @@ def start_all_servers():
 
 
 class ServerNode():
-    def __init__(self, config_name, configs, avg_election_timeout=10):
+    def __init__(self, config_name, configs, avg_election_timeout=0.5):
         config = configs[config_name]
         self.name = config_name
         self.config = config
@@ -135,7 +135,7 @@ class ServerNode():
         self.name2lastContactTime = {}
         self.txn_buffer = []
         for name in self.other_names:
-            self.name2nextIndex[name] = self.block_chain.lastLogIndex()
+            self.name2nextIndex[name] = self.block_chain.lastLogIndex() + 1
             self.name2lastContactTime[name] = time.time()
         self.send_heartbeats() # send heartbeats immediately
         self.heartbeat_end_event.clear()
@@ -375,11 +375,10 @@ class ServerNode():
         while True:
             if self.role == leader_role:
                 self.leader_update_followers()
-            if self.rpc_queue.empty():
-                continue
-            req = self.rpc_queue.get()
-            print(self.name, self.term, ":", req)
-            self.handle_req(req)
+            while not self.rpc_queue.empty():
+                req = self.rpc_queue.get()
+                print(self.name, self.term, ":", req)
+                self.handle_req(req)
         return
 
     def send_requestVote(self, name):
