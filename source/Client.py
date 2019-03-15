@@ -10,6 +10,8 @@ from ServerNode import *
 from utils import *
 from utils import *
 
+INITIAL_UNIT = 100
+
 
 class Client():
     def __init__(self, client_id):
@@ -17,6 +19,7 @@ class Client():
         self.id = client_id
         self.name = config["name"]
         self.config = config
+        self.current_unit = 100
         self.initial_unit = config["initial_amount"]
         self.send_port = None
         self.recv_port = config["recv_port"]
@@ -80,17 +83,34 @@ class Client():
             data = obtain_data(connection)
             json_data = json.loads(data)
             print("got data:", data)
-            self.update_client()
+            self.update_client(json_data)
 
-    def update_client(self):
+    def update_client(self, json_data):
         pass
 
     def handle_userInput(self):
+        '''
+        1. The blocks are initialized by input file, txt
+        2. After finishing initialization, user input transactions
+        3. If the sender in txn not current client, decline
+        '''
+        input_txn = None
+
         while True:
             #print('Please add transaction in format: Client1 Client2 Amount')
-            input_txn = input()
-            print(f'User input transaction: {input_txn}')
-            self.parse_input_transaction(input_txn)
+            if len(transaction_list) != 0:
+                parsed = transaction_list[0].split()
+                print(f'parsed {parsed}')
+
+                if self.name == parsed[0]:
+                    input_txn = transaction_list.pop(0)
+                    #print(f'pop: {input_txn}')
+                    self.parse_input_transaction(input_txn)
+
+            else:
+                input_txn = input()
+                print(f'User input transaction: {input_txn}')
+                self.parse_input_transaction(input_txn)
 
     def parse_input_transaction(self, input_txn):
         parsed_txn = input_txn.split()
@@ -99,6 +119,9 @@ class Client():
             print(f'The first client should be {self.name}')
         else:
             self.send_clientCommand(parsed_txn)
+
+    def printCurrentBalance(self):
+        print(f'Client {self.name}: current amount = {self.current_unit}')
 
 
 def main():
