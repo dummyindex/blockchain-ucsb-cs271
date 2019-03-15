@@ -1,5 +1,6 @@
 from utils import *
 
+
 class Block:
     def __init__(self, ta, tb, term, prev_header_hash):
         self.ta = ta
@@ -27,9 +28,9 @@ class Block:
             "txns": [self.ta, self.tb],
             "nonce": self.nonce,
             "term" : self.term,
-            "prev_header_hash": self.prev_header_hash,
-            "txn_hash": self.txn_hash,
-            "final_hash": self.final_hash
+            "prev_header_hash": encode_bytes(self.prev_header_hash),
+            "txn_hash": encode_bytes(self.txn_hash),
+            "final_hash": encode_bytes(self.final_hash)
         }
 
 class BlockChain():
@@ -59,3 +60,6 @@ class BlockChain():
             block = self.chain[i]
             res.append(block.to_dict())
         return res
+
+    def lastLogIndex(self):
+        return len(self.chain) - 1

@@ -1,6 +1,13 @@
 import hashlib
 import os
 import random
+import base64
+
+def encode_bytes(b):
+    return base64.b64encode(b)
+
+def decode_bytes(b):
+    return base64.b64decode(b)
 
 def sha256_str(s):
     return hashlib.sha256(s.encode('utf-8')).digest()
